@@ -8,6 +8,10 @@ import (
 	"github.com/timtadh/fs2/errors"
 )
 
+var (
+	ErrNotFound = errors.Errorf("error not found")
+)
+
 type bpt_iterator func() (a uint64, idx int, err error, bi bpt_iterator)
 
 func doIter(run func() (fs2.Iterator, error), do func(key, value []byte) error) error {
@@ -156,10 +160,26 @@ func (self *BpTree) DoFind(key []byte, do func(key, value []byte) error) error {
 	)
 }
 
-// Iterate over all of the key/values pairs with the given key. See
+// Find iterates over all of the key/values pairs with the given key. See
 // Iterate() for usage details.
 func (self *BpTree) Find(key []byte) (kvi fs2.Iterator, err error) {
 	return self.Range(key, key)
+}
+
+func (self *BpTree) UnsafeGet(key []byte, fn func(key []byte, val []byte) error) (err error) {
+	kvi, err := self.UnsafeRange(key, key)
+	if err != nil {
+		return err
+	}
+	var value []byte
+	key, value, err, _ = kvi()
+	if err != nil {
+		return err
+	}
+	if len(key) == 0 {
+		return ErrNotFound
+	}
+	return fn(key, value)
 }
 
 // How many key/value pairs are there with the given key.
