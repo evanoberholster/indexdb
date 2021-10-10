@@ -12,6 +12,7 @@ import (
 	"github.com/timtadh/fs2/fmap"
 )
 
+// Errors
 var (
 	ErrDuplicateFound = errors.New("error duplicate key found")
 	ErrNotFound       = bptree.ErrNotFound
@@ -20,7 +21,8 @@ var (
 type EncodeFn func() (key []byte, val []byte, err error)
 type DecodeFn func(key []byte, val []byte) error
 
-type IndexDB struct {
+// Index is an Index Database that is memory mapped to disk.
+type Index struct {
 	m      sync.RWMutex
 	bf     *fmap.BlockFile
 	bpt    *bptree.BpTree
@@ -28,17 +30,14 @@ type IndexDB struct {
 	config Config
 }
 
+// Config is the configuration for opening an IndexDB
 type Config struct {
 	Path             string
 	KeySize, ValSize int
 }
 
-func fileNotExist(path string) bool {
-	_, err := os.Stat(path)
-	return errors.Is(err, os.ErrNotExist)
-}
-
-func OpenIndexDB(config Config) (*IndexDB, error) {
+// Open an IndexDB with the given Config
+func Open(config Config) (*Index, error) {
 	var bf *fmap.BlockFile
 	var bpt *bptree.BpTree
 	var err error
@@ -65,7 +64,7 @@ func OpenIndexDB(config Config) (*IndexDB, error) {
 		}
 	}
 	// Cuckoo Filter
-	return &IndexDB{
+	return &Index{
 		cf:     buildCuckooFilter(bpt),
 		bf:     bf,
 		bpt:    bpt,
@@ -83,18 +82,20 @@ func buildCuckooFilter(bpt *bptree.BpTree) *cuckoo.ScalableCuckooFilter {
 	return cf
 }
 
-func (i *IndexDB) Size() int {
+// Size returns the number of keys set.
+func (i *Index) Size() int {
 	return i.bpt.Size()
 }
 
-func (i *IndexDB) Close() error {
+// Close the Index
+func (i *Index) Close() error {
 	i.m.Lock()
 	defer i.m.Unlock()
 	return i.bf.Close()
 }
 
-func (i *IndexDB) Set(key []byte, val []byte) error {
-	// Cuckoo Filter
+// Set a key and value to the IndexDB.
+func (i *Index) Set(key []byte, val []byte) error {
 	i.m.Lock()
 	defer i.m.Unlock()
 	if !i.cf.Lookup(key) {
@@ -110,8 +111,9 @@ func (i *IndexDB) Set(key []byte, val []byte) error {
 	return err
 }
 
-func (i *IndexDB) Get(key []byte, decodeFn DecodeFn) error {
-	// Cuckoo Filter
+// Get a key from the Index and process with the decodeFn.
+// Uses an unsafeGet.
+func (i *Index) Get(key []byte, decodeFn DecodeFn) error {
 	i.m.RLock()
 	defer i.m.RUnlock()
 	if !i.cf.Lookup(key) {
@@ -120,11 +122,17 @@ func (i *IndexDB) Get(key []byte, decodeFn DecodeFn) error {
 	return i.bpt.UnsafeGet(key, decodeFn)
 }
 
-func (i *IndexDB) Remove(key []byte) error {
+// Remove a key from the Index
+func (i *Index) Remove(key []byte) error {
 	i.m.Lock()
 	defer i.m.Unlock()
 	if i.cf.Delete(key) {
 		i.bpt.Remove(key, func(b []byte) bool { return true })
 	}
 	return ErrNotFound
+}
+
+func fileNotExist(path string) bool {
+	_, err := os.Stat(path)
+	return errors.Is(err, os.ErrNotExist)
 }
