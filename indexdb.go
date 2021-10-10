@@ -21,11 +21,11 @@ type EncodeFn func() (key []byte, val []byte, err error)
 type DecodeFn func(key []byte, val []byte) error
 
 type IndexDB struct {
+	m      sync.RWMutex
 	bf     *fmap.BlockFile
 	bpt    *bptree.BpTree
-	config Config
-	m      sync.RWMutex
 	cf     *cuckoo.ScalableCuckooFilter
+	config Config
 }
 
 type Config struct {
@@ -33,7 +33,7 @@ type Config struct {
 	KeySize, ValSize int
 }
 
-func indexNotExist(path string) bool {
+func fileNotExist(path string) bool {
 	_, err := os.Stat(path)
 	return errors.Is(err, os.ErrNotExist)
 }
@@ -43,7 +43,7 @@ func OpenIndexDB(config Config) (*IndexDB, error) {
 	var bpt *bptree.BpTree
 	var err error
 	// If file path doesn't exist -> create
-	if indexNotExist(config.Path) {
+	if fileNotExist(config.Path) {
 		bf, err = fmap.CreateBlockFile(config.Path)
 		if err != nil {
 			return nil, err
@@ -65,7 +65,6 @@ func OpenIndexDB(config Config) (*IndexDB, error) {
 		}
 	}
 	// Cuckoo Filter
-
 	return &IndexDB{
 		cf:     buildCuckooFilter(bpt),
 		bf:     bf,
@@ -119,4 +118,13 @@ func (i *IndexDB) Get(key []byte, decodeFn DecodeFn) error {
 		return ErrNotFound
 	}
 	return i.bpt.UnsafeGet(key, decodeFn)
+}
+
+func (i *IndexDB) Remove(key []byte) error {
+	i.m.Lock()
+	defer i.m.Unlock()
+	if i.cf.Delete(key) {
+		i.bpt.Remove(key, func(b []byte) bool { return true })
+	}
+	return ErrNotFound
 }
