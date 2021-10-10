@@ -99,7 +99,9 @@ func (i *Index) Set(key []byte, val []byte) error {
 	i.m.Lock()
 	defer i.m.Unlock()
 	if !i.cf.Lookup(key) {
-		return i.bpt.Add(key, val)
+		if i.cf.Insert(key) {
+			return i.bpt.Add(key, val)
+		}
 	}
 	err := i.bpt.UnsafeGet(key, func(key, value []byte) error {
 		copy(val, value)
